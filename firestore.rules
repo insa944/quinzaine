@@ -1,0 +1,88 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Collections
+    match /posts/{postId} {
+      // Basic validation
+      function isValidPost(data) {
+        return data.keys().hasAll(['type', 'content', 'authorId', 'authorName', 'votesPour', 'votesContre', 'createdAt', 'status'])
+          && data.type in ['text', 'hashtag']
+          && data.content is string && data.content.size() > 0 && data.content.size() <= 1000
+          && data.authorId is string
+          && data.authorName is string
+          && data.votesPour is number
+          && data.votesContre is number
+          && data.status in ['pending', 'approved', 'rejected'];
+      }
+
+      // Allow authenticated users to read and list posts
+      allow read, list: if isSignedIn();
+
+      // Allow creating posts
+      allow create: if isSignedIn() 
+        && isValidPost(incoming())
+        && isOwner(incoming().authorId)
+        && incoming().votesPour == 0
+        && incoming().votesContre == 0
+        && incoming().status == 'pending'
+        && incoming().createdAt == request.time;
+
+      // Allow voting (updating only vote counts)
+      allow update: if isSignedIn()
+        && isValidPost(incoming())
+        && (
+          // Case 1: Simple vote increment
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['votesPour'])
+            && incoming().votesPour == existing().votesPour + 1
+          ) || 
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['votesContre'])
+            && incoming().votesContre == existing().votesContre + 1
+          )
+        )
+        // Ensure immutable fields stay immutable
+        && incoming().authorId == existing().authorId
+        && incoming().createdAt == existing().createdAt
+        && incoming().type == existing().type;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId);
+    }
+    
+    // Internal test connection path
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}

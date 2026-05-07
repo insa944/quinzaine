@@ -1,0 +1,6 @@
+{
+  "name": "Social Hub Validator",
+  "description": "Outil collaboratif de validation de contenu social media avec score qualité et votes d'équipe.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
